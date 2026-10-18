@@ -1,12 +1,11 @@
 plugins {
     id("com.android.application")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
-    namespace = "com.esias.teachpoint"
-    compileSdk = flutter.compileSdkVersion
+    namespace = "com.teachpoint"
+    compileSdk = 35 // <-- OBLIGATOIREMENT 35 POUR JNI_FLUTTER
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -15,20 +14,15 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.esias.teachpoint"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        applicationId = "com.teachpoint"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 35 // <-- 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
