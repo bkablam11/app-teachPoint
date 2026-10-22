@@ -95,7 +95,7 @@ class SyncService {
     return syncedCount;
   }
 
-  /// 1. TÉLÉCHARGE L'ENVIRONNEMENT D'UN ENSEIGNANT VIA SON TEACHER_ID
+/// 1. TÉLÉCHARGE L'ENVIRONNEMENT D'UN ENSEIGNANT (PROFIL + CLASSES + EMPLOI DU TEMPS)
   Future<int> fetchTeacherEnvironment(String teacherId) async {
     final db = await DatabaseHelper.instance.database;
     final prof = await db.query('profile', limit: 1);
@@ -106,7 +106,7 @@ class SyncService {
 
     final response = await _dio.get(url, queryParameters: {
       'action': 'GET_TEACHER_ENV',
-      'teacher_id': teacherId.trim().toUpperCase(),
+      'teacher_id': teacherId.trim(),
     });
 
     if (response.statusCode == 200) {
@@ -149,6 +149,26 @@ class SyncService {
           classesCount++;
         }
       }
+
+      // Mise à jour de l'Emploi du Temps Hebdomadaire
+      if (data['schedules'] != null) {
+        final List schList = data['schedules'];
+        await db.delete('schedules'); // Nettoie pour synchroniser avec l'emploi du temps officiel
+        for (var s in schList) {
+          await db.insert('schedules', {
+            'id': s['id'].toString(),
+            'jour_semaine': (s['jour_semaine'] as num).toInt(),
+            'jour_nom': s['jour_nom'].toString(),
+            'heure_debut': s['heure_debut'].toString(),
+            'heure_fin': s['heure_fin'].toString(),
+            'duree_heures': (s['duree_heures'] as num).toDouble(),
+            'class_id': s['class_id'].toString(),
+            'nom_classe': s['nom_classe'].toString(),
+            'matiere': s['matiere'].toString(),
+          });
+        }
+      }
+
       return classesCount;
     } else {
       throw Exception("Erreur de connexion (Code ${response.statusCode})");

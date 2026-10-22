@@ -13,7 +13,6 @@ class DatabaseHelper {
     if (_database == null) {
       _database = await _initDB('teachpoint_esias.db');
     }
-    // S'assure que les colonnes existent systématiquement à chaque appel
     await _autoRepair(_database!);
     return _database!;
   }
@@ -24,7 +23,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 5,
+      version: 7,
       onCreate: _createDB,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
@@ -55,6 +54,20 @@ class DatabaseHelper {
         taux_horaire REAL NOT NULL,
         annee_scolaire TEXT NOT NULL,
         onglet_progression TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE schedules (
+        id TEXT PRIMARY KEY,
+        jour_semaine INTEGER NOT NULL,
+        jour_nom TEXT NOT NULL,
+        heure_debut TEXT NOT NULL,
+        heure_fin TEXT NOT NULL,
+        duree_heures REAL NOT NULL,
+        class_id TEXT NOT NULL,
+        nom_classe TEXT NOT NULL,
+        matiere TEXT NOT NULL
       )
     ''');
 
@@ -90,9 +103,7 @@ class DatabaseHelper {
         montant_net REAL DEFAULT 0.0,
         statut_paiement TEXT DEFAULT 'NON_PAYE',
         remarque TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(class_id) REFERENCES classes(id),
-        FOREIGN KEY(lesson_id) REFERENCES syllabus_lessons(id)
+        created_at TEXT NOT NULL
       )
     ''');
 
@@ -105,37 +116,30 @@ class DatabaseHelper {
         status TEXT NOT NULL
       )
     ''');
+
+    await _seedDefaultData(db);
   }
 
   Future<void> _autoRepair(Database db) async {
-    try {
-      await db.execute('ALTER TABLE attendance_records ADD COLUMN statut_paiement TEXT DEFAULT "NON_PAYE"');
-    } catch (_) {}
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS schedules (
+        id TEXT PRIMARY KEY,
+        jour_semaine INTEGER NOT NULL,
+        jour_nom TEXT NOT NULL,
+        heure_debut TEXT NOT NULL,
+        heure_fin TEXT NOT NULL,
+        duree_heures REAL NOT NULL,
+        class_id TEXT NOT NULL,
+        nom_classe TEXT NOT NULL,
+        matiere TEXT NOT NULL
+      )
+    ''');
 
-    try {
-      await db.execute('ALTER TABLE attendance_records ADD COLUMN montant_taxe REAL DEFAULT 0.0');
-    } catch (_) {}
+    await _seedDefaultData(db);
+  }
 
-    try {
-      await db.execute('ALTER TABLE attendance_records ADD COLUMN montant_net REAL DEFAULT 0.0');
-    } catch (_) {}
-
-    try {
-      await db.execute('ALTER TABLE attendance_records ADD COLUMN teacher_id TEXT DEFAULT "1001"');
-    } catch (_) {}
-
-    try {
-      await db.execute('ALTER TABLE profile ADD COLUMN taux_taxe_pourcent REAL DEFAULT 7.5');
-    } catch (_) {}
-
-    try {
-      await db.execute('ALTER TABLE profile ADD COLUMN teacher_id TEXT DEFAULT "1001"');
-    } catch (_) {}
-
-    try {
-      await db.execute('ALTER TABLE classes ADD COLUMN onglet_progression TEXT DEFAULT ""');
-    } catch (_) {}
-
+  Future<void> _seedDefaultData(Database db) async {
+    // 1. Profil par défaut
     final prof = await db.query('profile', limit: 1);
     if (prof.isEmpty) {
       await db.insert('profile', {
@@ -144,10 +148,77 @@ class DatabaseHelper {
         'nom': 'KABLAM',
         'prenoms': 'Edjabrou Ulrich Blanchard',
         'etablissement': 'ESIAS POLYTECHNIQUE (Groupe Adama Sanogo)',
-        'contact': '+225 07 00 00 00 00',
+        'contact': '+225 07 48 78 22 05',
         'taux_taxe_pourcent': 7.5,
         'sheets_web_app_url': 'https://script.google.com/macros/s/AKfycbzEHBCrdaK2ExJ9Eg2uZ7rEdlgg6CsY8ag1kGF6h897bk7iza0b5gYyeRnorznPO4TG-g/exec',
         'app_version': '1.0.0'
+      });
+    }
+
+    // 2. Classes par défaut (Garantit que la liste n'est JAMAIS vide)
+    final cls = await db.query('classes');
+    if (cls.isEmpty) {
+      await db.insert('classes', {
+        'id': 'cls_2a_gc_bat',
+        'nom_classe': '2A BTS GC-BAT',
+        'matiere': 'Mathématiques Générales',
+        'taux_horaire': 5000.0,
+        'annee_scolaire': '2026-2027',
+        'onglet_progression': 'PROG_2A_BTS_GC_BAT'
+      });
+      await db.insert('classes', {
+        'id': 'cls_1a_ida',
+        'nom_classe': '1A BTS IDA',
+        'matiere': 'Mathématiques Financières & R.O',
+        'taux_horaire': 4000.0,
+        'annee_scolaire': '2026-2027',
+        'onglet_progression': 'PROG_1A_BTS_IDA'
+      });
+      await db.insert('classes', {
+        'id': 'cls_1a_fcge',
+        'nom_classe': '1A BTS FCGE',
+        'matiere': 'Mathématique Financière et R.O',
+        'taux_horaire': 4000.0,
+        'annee_scolaire': '2026-2027',
+        'onglet_progression': 'PROG_1A_BTS_FCGE'
+      });
+    }
+
+    // 3. Emploi du temps par défaut
+    final sch = await db.query('schedules');
+    if (sch.isEmpty) {
+      await db.insert('schedules', {
+        'id': 'sch_jeudi',
+        'jour_semaine': 4, // Jeudi
+        'jour_nom': 'JEUDI',
+        'heure_debut': '13:30',
+        'heure_fin': '16:30',
+        'duree_heures': 3.0,
+        'class_id': 'cls_2a_gc_bat',
+        'nom_classe': '2A BTS GC-BAT',
+        'matiere': 'Mathématiques Générales'
+      });
+      await db.insert('schedules', {
+        'id': 'sch_ven_1',
+        'jour_semaine': 5, // Vendredi
+        'jour_nom': 'VENDREDI',
+        'heure_debut': '13:30',
+        'heure_fin': '15:30',
+        'duree_heures': 2.0,
+        'class_id': 'cls_1a_fcge',
+        'nom_classe': '1A BTS FCGE',
+        'matiere': 'Mathématique Financière et R.O'
+      });
+      await db.insert('schedules', {
+        'id': 'sch_ven_2',
+        'jour_semaine': 5, // Vendredi
+        'jour_nom': 'VENDREDI',
+        'heure_debut': '15:35',
+        'heure_fin': '17:35',
+        'duree_heures': 2.0,
+        'class_id': 'cls_1a_ida',
+        'nom_classe': '1A BTS IDA',
+        'matiere': 'Mathématiques Financières & R.O'
       });
     }
   }

@@ -7,7 +7,8 @@ import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:printing/printing.dart';
-
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'features/pointage/history_screen.dart';
 import 'core/network/sync_service.dart';
 import 'core/updater/update_service.dart';
 import 'core/database/database_helper.dart';
@@ -59,34 +60,28 @@ class DashboardScreen extends ConsumerStatefulWidget {
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   final currencyFmt = NumberFormat.currency(locale: 'fr_FR', symbol: 'FCFA', decimalDigits: 0);
+  bool _isOnWifi = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkDirectUpdate(silent: true);
+    _checkNetworkStatus();
+    Connectivity().onConnectivityChanged.listen((results) {
+      if (mounted) {
+        setState(() {
+          _isOnWifi = results.contains(ConnectivityResult.wifi);
+        });
+      }
     });
   }
 
-  Future<void> _checkDirectUpdate({bool silent = false}) async {
-    try {
-      final info = await UpdateService.instance.checkForUpdate();
-      if (!mounted) return;
-
-      if (info.hasUpdate) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (ctx) => AlertDialog(
-            title: const Text("Mise à jour disponible"),
-            content: Text("Version v${info.latestVersion}\n\n${info.changelog}"),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Fermer")),
-            ],
-          ),
-        );
-      }
-    } catch (_) {}
+  Future<void> _checkNetworkStatus() async {
+    final connectivity = await Connectivity().checkConnectivity();
+    if (mounted) {
+      setState(() {
+        _isOnWifi = connectivity.contains(ConnectivityResult.wifi);
+      });
+    }
   }
 
   @override
@@ -147,6 +142,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               );
             },
           ),
+          IconButton(
+            icon: const Icon(Icons.history_rounded, color: Colors.white),
+            tooltip: 'Historique des Séances',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const HistoryScreen()),
+              );
+            },
+          ),
         ],
       ),
       body: dashState.when(
@@ -163,7 +168,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // SÉLECTEUR DE CLASSE INTERACTIF
+                // 1. BADGE DE CERTIFICATION DU RÉSEAU (WIFI vs 4G)
+                _buildNetworkBadge(),
+                const SizedBox(height: 10),
+
+                // 2. SÉLECTEUR DE CLASSE INTERACTIF
                 if (data.allClasses.isNotEmpty)
                   Container(
                     margin: const EdgeInsets.only(bottom: 12),
@@ -198,12 +207,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     ),
                   ),
 
+                // 3. CARTE FINANCIÈRE
                 _buildFinanceCard(data),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
+
+                // 4. BANDEAU DE L'EMPLOI DU TEMPS OFFICIEL DÉTECTÉ
+                _buildTodayScheduleCard(data),
+                const SizedBox(height: 14),
+
+                // 5. CAHIER DE TEXTE (LEÇON SUIVANTE)
                 _buildSyllabusPreviewCard(context, data),
                 const SizedBox(height: 24),
-                _buildClockButton(context, data),
+
+                // 6. GROS BOUTON 1-CLIC D'ÉMARGEMENT DIRECT
+                _buildOneClickAttendanceButton(context, data),
                 const SizedBox(height: 24),
+
+                // 7. DÉTAILS ADMINISTRATIFS
                 _buildDetailsCard(data),
               ],
             ),
@@ -213,7 +233,74 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-Widget _buildFinanceCard(DashboardState state) {
+  Widget _buildNetworkBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: _isOnWifi ? const Color(0xFF10B981).withOpacity(0.12) : const Color(0xFFF59E0B).withOpacity(0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _isOnWifi ? const Color(0xFF10B981) : const Color(0xFFF59E0B), width: 0.8),
+      ),
+      child: Row(
+        children: [
+          Icon(_isOnWifi ? Icons.wifi : Icons.wifi_off_rounded,
+              size: 18, color: _isOnWifi ? const Color(0xFF10B981) : const Color(0xFFF59E0B)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _isOnWifi
+                  ? "Présence Certifiée • Connecté au Réseau de l'Établissement"
+                  : "Connexion Données Mobiles (4G) • Émargement toléré",
+              style: TextStyle(
+                color: _isOnWifi ? const Color(0xFF0F5132) : const Color(0xFF664D03),
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTodayScheduleCard(DashboardState state) {
+    final slot = state.todayCurrentSlot;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.04),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF0F172A).withOpacity(0.1)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.calendar_today_rounded, size: 20, color: Color(0xFF0F172A)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  slot != null
+                      ? "Créneau du jour : ${slot.jourNom} ${slot.heureDebut} - ${slot.heureFin} (${slot.dureeHeures}H)"
+                      : "Aujourd'hui : Aucun créneau fixe à l'emploi du temps",
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0F172A)),
+                ),
+                Text(
+                  slot != null
+                      ? "Classe : ${slot.nomClasse} • ${slot.matiere}"
+                      : "Vous pouvez émarger pour la classe sélectionnée ci-dessus.",
+                  style: const TextStyle(fontSize: 11, color: Colors.black54),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFinanceCard(DashboardState state) {
     final taxePct = state.profile?.tauxTaxePourcent ?? 7.5;
 
     return Container(
@@ -231,7 +318,6 @@ Widget _buildFinanceCard(DashboardState state) {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // EXPANDED ÉVITE DÉFINITIVEMENT LE DÉBORDEMENT DE 13 PIXELS
               Expanded(
                 child: Text(
                   "NET À PERCEVOIR (APRÈS TAXE)",
@@ -338,13 +424,6 @@ Widget _buildFinanceCard(DashboardState state) {
               lesson.titreLecon,
               style: const TextStyle(fontSize: 12, color: Colors.black54),
             ),
-            if (lesson.objectifs != null && lesson.objectifs!.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                "Objectif : ${lesson.objectifs}",
-                style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.black45),
-              ),
-            ]
           ] else ...[
             const Text(
               "Toutes les leçons de cette classe sont validées !",
@@ -356,8 +435,10 @@ Widget _buildFinanceCard(DashboardState state) {
     );
   }
 
-  Widget _buildClockButton(BuildContext context, DashboardState state) {
-    final isClocked = state.isClockedIn;
+  // LE NOUVEAU BOUTON 1-CLIC BASÉ SUR L'EMPLOI DU TEMPS
+  Widget _buildOneClickAttendanceButton(BuildContext context, DashboardState state) {
+    final isSigned = state.isAlreadySignedToday;
+    final duree = state.todayCurrentSlot?.dureeHeures ?? 2.0;
 
     return Center(
       child: Column(
@@ -365,22 +446,24 @@ Widget _buildFinanceCard(DashboardState state) {
           GestureDetector(
             onTap: () {
               HapticFeedback.mediumImpact();
-              if (!isClocked) {
-                ref.read(dashboardProvider.notifier).startClockIn();
+              if (isSigned) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Séance d'aujourd'hui déjà émargée avec succès !")),
+                );
               } else {
-                _confirmClockOut(context);
+                _showSignDialog(context, state);
               }
             },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 300),
-              width: 170,
-              height: 170,
+              width: 175,
+              height: 175,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: isClocked ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                color: isSigned ? const Color(0xFF64748B) : const Color(0xFF10B981),
                 boxShadow: [
                   BoxShadow(
-                    color: (isClocked ? const Color(0xFFEF4444) : const Color(0xFF10B981)).withOpacity(0.35),
+                    color: (isSigned ? const Color(0xFF64748B) : const Color(0xFF10B981)).withOpacity(0.35),
                     blurRadius: 20,
                     spreadRadius: 4,
                   )
@@ -390,13 +473,13 @@ Widget _buildFinanceCard(DashboardState state) {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
-                    isClocked ? Icons.stop_rounded : Icons.fingerprint_rounded,
+                    isSigned ? Icons.check_circle_rounded : Icons.fingerprint_rounded,
                     size: 54,
                     color: Colors.white,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    isClocked ? "CLÔTURER\nLE COURS" : "POINTER\nL'ARRIVÉE",
+                    isSigned ? "COURS ÉMARGÉ\nAUJOURD'HUI" : "ÉMARGER\nLA SÉANCE (${duree.toStringAsFixed(0)}H)",
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: Colors.white,
@@ -410,16 +493,76 @@ Widget _buildFinanceCard(DashboardState state) {
             ),
           ),
           const SizedBox(height: 12),
-          if (isClocked)
-            Text(
-              "En cours depuis : ${DateFormat('HH:mm').format(state.clockInTime!)}",
-              style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFEF4444), fontSize: 13),
-            )
-          else
-            Text(
-              "Pointage pour : ${state.selectedClass?.nomClasse ?? '-'}",
-              style: const TextStyle(color: Colors.black54, fontSize: 11, fontWeight: FontWeight.bold),
-            )
+          Text(
+            isSigned
+                ? "Séance validée et enregistrée pour aujourd'hui"
+                : "1 clic = Validation immédiate du créneau (${state.selectedClass?.nomClasse ?? ''})",
+            style: TextStyle(
+              color: isSigned ? const Color(0xFF10B981) : Colors.black54,
+              fontSize: 11,
+              fontWeight: isSigned ? FontWeight.bold : FontWeight.normal,
+            ),
+          )
+        ],
+      ),
+    );
+  }
+
+  void _showSignDialog(BuildContext context, DashboardState state) {
+    final slot = state.todayCurrentSlot;
+    final duree = slot?.dureeHeures ?? 2.0;
+    final classeName = state.selectedClass?.nomClasse ?? "";
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: const [
+            Icon(Icons.assignment_turned_in_rounded, color: Color(0xFF10B981)),
+            SizedBox(width: 8),
+            Text("Émarger la séance", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("Classe : $classeName", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            const SizedBox(height: 4),
+            Text("Créneau : ${slot?.heureDebut ?? '13:30'} - ${slot?.heureFin ?? '16:30'} ($duree Heures officielles)"),
+            const SizedBox(height: 6),
+            if (state.nextLesson != null)
+              Text("Leçon : ${state.nextLesson!.titreLecon}",
+                  style: const TextStyle(fontSize: 12, color: Colors.black54, fontStyle: FontStyle.italic)),
+            const Divider(height: 20),
+            const Text(
+              "Confirmez-vous votre présence pour ce créneau ? Les heures seront ajoutées immédiatement à votre bordereau mensuel.",
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx, rootNavigator: true).pop(),
+            child: const Text("Annuler"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
+            onPressed: () async {
+              Navigator.of(ctx, rootNavigator: true).pop();
+              await ref.read(dashboardProvider.notifier).signAttendance1Click();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text("Séance de $classeName émargée avec succès ($duree H) !"),
+                    backgroundColor: const Color(0xFF10B981),
+                  ),
+                );
+              }
+            },
+            child: const Text("Émarger maintenant", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
         ],
       ),
     );
@@ -469,55 +612,6 @@ Widget _buildFinanceCard(DashboardState state) {
     );
   }
 
-  // BOÎTE DE DIALOGUE : BOUTON ANNULER RÉPARÉ AVEC rootNavigator: true
-void _confirmClockOut(BuildContext context) {
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text("Clôturer la séance ?"),
-        content: const Text(
-          "Que souhaitez-vous faire pour cette séance de cours ?",
-        ),
-        actions: [
-          // 1. ANNULER : REMET L'ICÔNE DIRECTEMENT À L'ÉTAT INITIAL VERT SANS ENREGISTRER
-          TextButton(
-            onPressed: () {
-              Navigator.of(dialogCtx, rootNavigator: true).pop();
-              ref.read(dashboardProvider.notifier).cancelClockIn(); // REMISE À ZÉRO DU BOUTON
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text("Pointage annulé : retour à l'état initial."),
-                  backgroundColor: Colors.black54,
-                ),
-              );
-            },
-            child: const Text("Annuler la séance", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-          ),
-
-          // 2. VALIDER : ENREGISTRE DANS SQLITE, CALCUL DU SALAIRE ET CLÔTURE
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F172A)),
-            onPressed: () async {
-              Navigator.of(dialogCtx, rootNavigator: true).pop();
-              await ref.read(dashboardProvider.notifier).completeClockOut();
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Séance validée et enregistrée avec succès !"),
-                    backgroundColor: Color(0xFF10B981),
-                  ),
-                );
-              }
-            },
-            child: const Text("Valider", style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // GÉNÈRE LE BORDEREAU GÉNÉRAL REGROUPANT TOUTES LES CLASSES DU MOIS
   Future<void> _printPdf(BuildContext context) async {
     final db = await DatabaseHelper.instance.database;
     final profRows = await db.query('profile', limit: 1);
@@ -532,7 +626,6 @@ void _confirmClockOut(BuildContext context) {
     final now = DateTime.now();
     final currentMonthPrefix = "${now.year}-${now.month.toString().padLeft(2, '0')}";
 
-    // RÉCUPÈRE LES COURS DE TOUTES LES CLASSES POUR CE MOIS
     final attRows = await db.query(
       'attendance_records',
       where: 'date_cours LIKE ?',

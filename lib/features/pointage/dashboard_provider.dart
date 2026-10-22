@@ -13,26 +13,26 @@ class DashboardState {
   final List<ClassEntity> allClasses;
   final ClassEntity? selectedClass;
   final SyllabusLesson? nextLesson;
+  final ScheduleSlot? todayCurrentSlot;
+  final bool isAlreadySignedToday;
   final double totalMonthBrut;
   final double totalMonthTaxe;
   final double totalMonthNet;
   final double totalMonthHours;
   final int pendingSyncCount;
-  final bool isClockedIn;
-  final DateTime? clockInTime;
 
   DashboardState({
     this.profile,
     this.allClasses = const [],
     this.selectedClass,
     this.nextLesson,
+    this.todayCurrentSlot,
+    this.isAlreadySignedToday = false,
     this.totalMonthBrut = 0.0,
     this.totalMonthTaxe = 0.0,
     this.totalMonthNet = 0.0,
     this.totalMonthHours = 0.0,
     this.pendingSyncCount = 0,
-    this.isClockedIn = false,
-    this.clockInTime,
   });
 
   DashboardState copyWith({
@@ -40,26 +40,26 @@ class DashboardState {
     List<ClassEntity>? allClasses,
     ClassEntity? selectedClass,
     SyllabusLesson? nextLesson,
+    ScheduleSlot? todayCurrentSlot,
+    bool? isAlreadySignedToday,
     double? totalMonthBrut,
     double? totalMonthTaxe,
     double? totalMonthNet,
     double? totalMonthHours,
     int? pendingSyncCount,
-    bool? isClockedIn,
-    DateTime? clockInTime,
   }) {
     return DashboardState(
       profile: profile ?? this.profile,
       allClasses: allClasses ?? this.allClasses,
       selectedClass: selectedClass ?? this.selectedClass,
       nextLesson: nextLesson ?? this.nextLesson,
+      todayCurrentSlot: todayCurrentSlot ?? this.todayCurrentSlot,
+      isAlreadySignedToday: isAlreadySignedToday ?? this.isAlreadySignedToday,
       totalMonthBrut: totalMonthBrut ?? this.totalMonthBrut,
       totalMonthTaxe: totalMonthTaxe ?? this.totalMonthTaxe,
       totalMonthNet: totalMonthNet ?? this.totalMonthNet,
       totalMonthHours: totalMonthHours ?? this.totalMonthHours,
       pendingSyncCount: pendingSyncCount ?? this.pendingSyncCount,
-      isClockedIn: isClockedIn ?? this.isClockedIn,
-      clockInTime: clockInTime ?? this.clockInTime,
     );
   }
 }
@@ -87,6 +87,8 @@ class DashboardNotifier extends StateNotifier<AsyncValue<DashboardState>> {
     }
   }
 
+// Dans lib/features/pointage/dashboard_provider.dart
+
   Future<void> refreshData({String? chosenClassId}) async {
     try {
       final db = await DatabaseHelper.instance.database;
@@ -97,15 +99,47 @@ class DashboardNotifier extends StateNotifier<AsyncValue<DashboardState>> {
       final clsRows = await db.query('classes', orderBy: 'nom_classe ASC');
       final classes = clsRows.map((e) => ClassEntity.fromMap(e)).toList();
 
+      final now = DateTime.now();
+      final currentWeekday = now.weekday; // 4 = Jeudi, 5 = Vendredi...
+
+      // 1. Détermine la classe courante
       ClassEntity? currentClass;
-      if (chosenClassId != null) {
-        currentClass = classes.firstWhere((c) => c.id == chosenClassId, orElse: () => classes.first);
-      } else if (state.value?.selectedClass != null) {
-        currentClass = classes.firstWhere((c) => c.id == state.value!.selectedClass!.id, orElse: () => classes.first);
-      } else if (classes.isNotEmpty) {
-        currentClass = classes.first;
+      if (classes.isNotEmpty) {
+        if (chosenClassId != null) {
+          currentClass = classes.firstWhere((c) => c.id == chosenClassId, orElse: () => classes.first);
+        } else if (state.value?.selectedClass != null) {
+          currentClass = classes.firstWhere((c) => c.id == state.value!.selectedClass!.id, orElse: () => classes.first);
+        } else {
+          currentClass = classes.first;
+        }
       }
 
+      // 2. CRÉNEAU EXACT DE LA CLASSE SÉLECTIONNÉE DANS L'EMPLOI DU TEMPS
+      ScheduleSlot? detectedSlot;
+      if (currentClass != null) {
+        // Recherche prioritaire du créneau pour cette classe précise
+        final classSchedule = await db.query(
+          'schedules',
+          where: 'class_id = ? OR nom_classe = ?',
+          whereArgs: [currentClass.id, currentClass.nomClasse],
+        );
+
+        if (classSchedule.isNotEmpty) {
+          detectedSlot = ScheduleSlot.fromMap(classSchedule.first);
+        } else {
+          // Si pas de créneau fixe, créneau du jour par défaut
+          final todaySchedule = await db.query(
+            'schedules',
+            where: 'jour_semaine = ?',
+            whereArgs: [currentWeekday],
+          );
+          if (todaySchedule.isNotEmpty) {
+            detectedSlot = ScheduleSlot.fromMap(todaySchedule.first);
+          }
+        }
+      }
+
+      // 3. Prochaine leçon
       SyllabusLesson? nextLesson;
       if (currentClass != null) {
         final lessonRows = await db.query(
@@ -120,7 +154,19 @@ class DashboardNotifier extends StateNotifier<AsyncValue<DashboardState>> {
         }
       }
 
-      // NE CALCULE QUE LES HEURES DU MOIS QUI NE SONT PAS ENCORE MARQUÉES COMME PAYÉES
+      // 4. Vérification si déjà émargé aujourd'hui
+      final todayDateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+      bool alreadySigned = false;
+      if (currentClass != null) {
+        final checkAtt = await db.query(
+          'attendance_records',
+          where: 'class_id = ? AND date_cours = ?',
+          whereArgs: [currentClass.id, todayDateStr],
+        );
+        alreadySigned = checkAtt.isNotEmpty;
+      }
+
+      // 5. Total financier
       final stats = await db.rawQuery('''
         SELECT 
           SUM(heures_validees) as sum_h, 
@@ -146,13 +192,13 @@ class DashboardNotifier extends StateNotifier<AsyncValue<DashboardState>> {
           allClasses: classes,
           selectedClass: currentClass,
           nextLesson: nextLesson,
+          todayCurrentSlot: detectedSlot,
+          isAlreadySignedToday: alreadySigned,
           totalMonthHours: totalHours,
           totalMonthBrut: totalBrut,
           totalMonthTaxe: totalTaxe,
           totalMonthNet: totalNet > 0 ? totalNet : (totalBrut - totalTaxe),
           pendingSyncCount: queueCount,
-          isClockedIn: state.value?.isClockedIn ?? false,
-          clockInTime: state.value?.clockInTime,
         ),
       );
     } catch (e, st) {
@@ -160,61 +206,22 @@ class DashboardNotifier extends StateNotifier<AsyncValue<DashboardState>> {
     }
   }
 
-  void startClockIn() {
-    final current = state.value ?? DashboardState();
-    state = AsyncValue.data(
-      current.copyWith(
-        isClockedIn: true,
-        clockInTime: DateTime.now(),
-      ),
-    );
-  }
-
-  void cancelClockIn() {
-    final current = state.value;
-    if (current == null) return;
-    state = AsyncValue.data(
-      current.copyWith(
-        isClockedIn: false,
-        clockInTime: null,
-      ),
-    );
-  }
-
-  // RÉINITIALISATION APRÈS PAIEMENT DE LA VACATION
-  Future<int> resetMonthVacationsAsPaid() async {
-    final db = await DatabaseHelper.instance.database;
-    final count = await db.update(
-      'attendance_records',
-      {'statut_paiement': 'PAYE'},
-      where: 'statut_paiement IS NULL OR statut_paiement = ?',
-      whereArgs: ['NON_PAYE'],
-    );
-
-    // Rafraîchit immédiatement le tableau de bord à 0 FCFA
-    await refreshData();
-    return count;
-  }
-
-  Future<void> completeClockOut() async {
+  // ÉMARGEMENT PROPRE BASÉ SUR LE VOLUME ET LE TAUX DE LA CLASSE CHOISIE
+  Future<void> signAttendance1Click({double? customHours}) async {
     final s = state.value;
-    if (s == null || !s.isClockedIn || s.clockInTime == null || s.selectedClass == null) return;
+    if (s == null || s.selectedClass == null) return;
 
     final db = await DatabaseHelper.instance.database;
     final now = DateTime.now();
 
-    final arrivee = "${s.clockInTime!.hour.toString().padLeft(2, '0')}:${s.clockInTime!.minute.toString().padLeft(2, '0')}";
-    final depart = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
     final dateCours = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+    
+    // Volume officiel de CETTE classe : 2H pour FCGE/IDA, 3H pour GC-BAT
+    final duree = customHours ?? (s.todayCurrentSlot?.dureeHeures ?? (s.selectedClass!.nomClasse.contains("GC") ? 3.0 : 2.0));
+    final heureDebut = s.todayCurrentSlot?.heureDebut ?? "13:30";
+    final heureFin = s.todayCurrentSlot?.heureFin ?? (duree == 3.0 ? "16:30" : "15:30");
 
-    final diffMinutes = now.difference(s.clockInTime!).inMinutes;
-    double duree = diffMinutes / 60.0;
-    if (duree < 0.25) {
-      duree = s.nextLesson?.volumeHoraire ?? 2.0;
-    } else {
-      duree = (duree * 2).round() / 2;
-    }
-
+    // Taux horaire réel venant de Google Sheets (ex: 4000 FCFA)
     final taux = s.selectedClass!.tauxHoraire;
     final montantBrut = duree * taux;
     final taxePourcent = s.profile?.tauxTaxePourcent ?? 7.5;
@@ -230,8 +237,8 @@ class DashboardNotifier extends StateNotifier<AsyncValue<DashboardState>> {
       'class_id': s.selectedClass!.id,
       'lesson_id': s.nextLesson?.id,
       'date_cours': dateCours,
-      'heure_arrivee': arrivee,
-      'heure_depart': depart,
+      'heure_arrivee': heureDebut,
+      'heure_depart': heureFin,
       'heures_validees': duree,
       'taux_applique': taux,
       'montant_total': montantBrut,
@@ -267,14 +274,19 @@ class DashboardNotifier extends StateNotifier<AsyncValue<DashboardState>> {
       'enseignant': "${s.profile?.nom} ${s.profile?.prenoms}",
     });
 
-    state = AsyncValue.data(
-      s.copyWith(
-        isClockedIn: false,
-        clockInTime: null,
-      ),
-    );
-
     await refreshData();
+  }
+
+  Future<int> resetMonthVacationsAsPaid() async {
+    final db = await DatabaseHelper.instance.database;
+    final count = await db.update(
+      'attendance_records',
+      {'statut_paiement': 'PAYE'},
+      where: 'statut_paiement IS NULL OR statut_paiement = ?',
+      whereArgs: ['NON_PAYE'],
+    );
+    await refreshData();
+    return count;
   }
 }
 

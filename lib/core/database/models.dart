@@ -2,7 +2,7 @@
 
 class TeacherProfile {
   final String id;
-  final String teacherId; // Identifiant unique (ex: KABLAM)
+  final String teacherId; // Matricule numérique (ex: 1001)
   final String nom;
   final String prenoms;
   final String etablissement;
@@ -37,7 +37,7 @@ class TeacherProfile {
 
   factory TeacherProfile.fromMap(Map<String, dynamic> map) => TeacherProfile(
     id: map['id'],
-    teacherId: map['teacher_id'] ?? 'KABLAM',
+    teacherId: map['teacher_id']?.toString() ?? '1001',
     nom: map['nom'],
     prenoms: map['prenoms'],
     etablissement: map['etablissement'],
@@ -54,7 +54,7 @@ class ClassEntity {
   final String matiere;
   final double tauxHoraire;
   final String anneeScolaire;
-  final String ongletProgression; // Nom exact de l'onglet dans Google Sheets
+  final String ongletProgression;
 
   ClassEntity({
     required this.id,
@@ -92,7 +92,7 @@ class SyllabusLesson {
   final String titreLecon;
   final String? objectifs;
   final double volumeHoraire;
-  final String statut;
+  final String statut; // "A_VENIR" ou "FAIT"
   final String? dateRealisee;
   final int ordreSequence;
 
@@ -125,14 +125,14 @@ class SyllabusLesson {
   factory SyllabusLesson.fromMap(Map<String, dynamic> map) => SyllabusLesson(
     id: map['id'],
     classId: map['class_id'],
-    semaineNumero: map['semaine_numero'],
+    semaineNumero: (map['semaine_numero'] as num).toInt(),
     chapitre: map['chapitre'],
     titreLecon: map['titre_lecon'],
     objectifs: map['objectifs'],
     volumeHoraire: (map['volume_horaire'] as num).toDouble(),
     statut: map['statut'],
     dateRealisee: map['date_realisee'],
-    ordreSequence: map['ordre_sequence'],
+    ordreSequence: (map['ordre_sequence'] as num).toInt(),
   );
 }
 
@@ -146,9 +146,10 @@ class AttendanceRecord {
   final String heureDepart;
   final double heuresValidees;
   final double tauxApplique;
-  final double montantTotal;
-  final double montantTaxe;
-  final double montantNet;
+  final double montantTotal; // Montant Brut
+  final double montantTaxe;  // Déduction fiscale
+  final double montantNet;   // Net perçu
+  final String statutPaiement; // "NON_PAYE" ou "PAYE"
   final String? remarque;
   final String createdAt;
 
@@ -165,6 +166,7 @@ class AttendanceRecord {
     required this.montantTotal,
     required this.montantTaxe,
     required this.montantNet,
+    this.statutPaiement = 'NON_PAYE',
     this.remarque,
     required this.createdAt,
   });
@@ -182,13 +184,14 @@ class AttendanceRecord {
     'montant_total': montantTotal,
     'montant_taxe': montantTaxe,
     'montant_net': montantNet,
+    'statut_paiement': statutPaiement,
     'remarque': remarque,
     'created_at': createdAt,
   };
 
   factory AttendanceRecord.fromMap(Map<String, dynamic> map) => AttendanceRecord(
     id: map['id'],
-    teacherId: map['teacher_id'] ?? 'KABLAM',
+    teacherId: map['teacher_id']?.toString() ?? '1001',
     classId: map['class_id'],
     lessonId: map['lesson_id'],
     dateCours: map['date_cours'],
@@ -199,7 +202,57 @@ class AttendanceRecord {
     montantTotal: (map['montant_total'] as num).toDouble(),
     montantTaxe: (map['montant_taxe'] as num?)?.toDouble() ?? 0.0,
     montantNet: (map['montant_net'] as num?)?.toDouble() ?? (map['montant_total'] as num).toDouble(),
+    statutPaiement: map['statut_paiement'] ?? 'NON_PAYE',
     remarque: map['remarque'],
     createdAt: map['created_at'],
+  );
+}
+
+// CRÉNEAU DE L'EMPLOI DU TEMPS OFFICIEL (EX: JEUDI 13h30-16h30)
+class ScheduleSlot {
+  final String id;
+  final int jourSemaine; // 1 = Lundi, 4 = Jeudi, 5 = Vendredi...
+  final String jourNom;   // "JEUDI", "VENDREDI"
+  final String heureDebut; // "13:30"
+  final String heureFin;   // "16:30"
+  final double dureeHeures;// 3.0
+  final String classId;
+  final String nomClasse;
+  final String matiere;
+
+  ScheduleSlot({
+    required this.id,
+    required this.jourSemaine,
+    required this.jourNom,
+    required this.heureDebut,
+    required this.heureFin,
+    required this.dureeHeures,
+    required this.classId,
+    required this.nomClasse,
+    required this.matiere,
+  });
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'jour_semaine': jourSemaine,
+    'jour_nom': jourNom,
+    'heure_debut': heureDebut,
+    'heure_fin': heureFin,
+    'duree_heures': dureeHeures,
+    'class_id': classId,
+    'nom_classe': nomClasse,
+    'matiere': matiere,
+  };
+
+  factory ScheduleSlot.fromMap(Map<String, dynamic> map) => ScheduleSlot(
+    id: map['id'],
+    jourSemaine: (map['jour_semaine'] as num).toInt(),
+    jourNom: map['jour_nom'] ?? '',
+    heureDebut: map['heure_debut'],
+    heureFin: map['heure_fin'],
+    dureeHeures: (map['duree_heures'] as num).toDouble(),
+    classId: map['class_id'],
+    nomClasse: map['nom_classe'] ?? '',
+    matiere: map['matiere'] ?? '',
   );
 }
